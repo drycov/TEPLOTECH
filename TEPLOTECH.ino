@@ -54,6 +54,7 @@ struct DataConstants
   static const int numPoints = 13;
   static const int startAddress = 0;
   static const int NUM_TEMP_SENSORS = 4;
+  static const int MAX_MENU_ITEMS_DISPLAYED = 4;
 };
 
 struct CharsConstants
@@ -114,9 +115,9 @@ const float TemperatureData::t_wi[numPoints] = {71.9, 70.0, 68, 63, 57.9, 52.7, 
 
 struct MenuItem
 {
-  char label[20];
-  void (*onSelect)();
-  MenuItem *subMenu;
+  const char *label;
+  void (*action)();
+  MenuItem *subMenu; // Добавлено поле для хранения субменю
 };
 
 typedef MenuItem SubMenu;
@@ -227,12 +228,16 @@ struct SystemState
   int heater[3];
   int tempItem;
   int selectedItem;
-  int networkEditMode;
+  int NetworkEditMode;
   bool tempReached; // Флаг достижения температуры
   int tempHeater[3];
   NetworkSettings settings;
   MenuState menuState;
   SubMenuState subMenuState;
+  SubMenu *subMenu;
+  SubMenu *previousSubMenu;
+  MenuItem *currentSubMenu;
+
 };
 
 SystemState systemState;
@@ -400,7 +405,7 @@ void initializeDefaultSettings()
   defaultSystemState.heater[2] = HeaterState::OFF;
   defaultSystemState.tempItem = 0;
   defaultSystemState.selectedItem = 0;
-  defaultSystemState.networkEditMode = 0;
+  defaultSystemState.NetworkEditMode = 0;
   defaultSystemState.tempReached = false;
   defaultSystemState.tempHeater[0] = HeaterState::OFF;
   defaultSystemState.tempHeater[1] = HeaterState::OFF;
@@ -479,58 +484,58 @@ void loop()
   setupMenu();
   readTemperatures();
   byte keyPressed = readKey();
-  t_wo_output = interpolate(outsideTemp, DataConstants::numPoints, t_n, t_wo);
-  t_wi_output = interpolate(outsideTemp, DataConstants::numPoints, t_n, t_wi);
+  temperatureData.t_wo_output = interpolate(temperatureData.outsideTemp, DataConstants::numPoints, temperatureData.t_n, temperatureData.t_wo);
+  temperatureData.t_wi_output = interpolate(temperatureData.outsideTemp, DataConstants::numPoints, temperatureData.t_n, temperatureData.t_wi);
   if (LCDUpdater.isReady())
   {
     lcd.clear();
   }
   if (ThermReadWindow.isReady())
   {
-    // heaterController();
+    heaterController();
   }
   switch (systemState.menuState)
   {
-  case NORMAL:
-    if (keyPressed == OK)
+  case MenuState::NORMAL:
+    if (keyPressed == MenuConstants::OK)
     {
       systemState.menuState = MenuState::MAIN_MENU;
       lcd.clear();
       displayMenu();
     }
-    else if (keyPressed == LEFT)
+    else if (keyPressed == MenuConstants::LEFT)
     {
       systemState.stopState = (systemState.stopState == 1) ? HeaterState::OFF : HeaterState::ON;
       eepromData.stopState = systemState.stopState;
       eepromData.writeToEEPROM(DataConstants::startAddress);
     }
     displayNormalData();
-    // handleTemp(keyPressed);
+    handleTemp(keyPressed);
     break;
-  case MAIN_MENU:
-    // handleMenu(keyPressed);
-    // displayMenu();
+  case MenuState::MAIN_MENU:
+    handleMenu(keyPressed);
+    displayMenu();
     break;
-  case SUB_MENU:
+  case MenuState::SUB_MENU:
     if (systemState.subMenuState == NETWORK_SETTINGS)
     {
-      // handleNetworkSettingsMenu(keyPressed, settings);
+      handleNetworkSettingsMenu(keyPressed, systemState.settings);
     }
     else
     {
-      // handleSubMenu(keyPressed);
+      handleSubMenu(keyPressed);
     }
     break;
-  case CH_HEATERS_STATUS:
-    // handleHeaterSettings();
+  case MenuState::CH_HEATERS_STATUS:
+    handleHeaterSettings();
     break;
 
-  case CH_PUMP_STATUS:
-    // handlePumpSettings();
+  case MenuState::CH_PUMP_STATUS:
+    handlePumpSettings();
     break;
 
-  case CH_WORK_MODE:
-    // handleModeSettings();
+  case MenuState::CH_WORK_MODE:
+    handleModeSettings();
     break;
 
   default:
@@ -557,12 +562,12 @@ void displayNormalData()
   printHeaterStatus();
   displaySetWoinTemp();
   displaySystemState();
-  displayStatus(char(4), insideTemp, "E", 0, 1);
+  displayStatus(char(4), temperatureData.insideTemp, "E", 0, 1);
   displayWorkModeState();
-  displayStatus(char(5), waterOutTemp, "E", 15, 1);
-  displayStatus(char(3), outsideTemp, "E", 0, 2);
+  displayStatus(char(5), temperatureData.waterOutTemp, "E", 15, 1);
+  displayStatus(char(3), temperatureData.outsideTemp, "E", 0, 2);
   displayPumpState();
-  displayStatus(char(126), waterInTemp, "E", 15, 2);
+  displayStatus(char(126), temperatureData.waterInTemp, "E", 15, 2);
   displayHSVal();
 }
 
@@ -578,7 +583,7 @@ void printHeaterStatus()
 {
   lcd.setCursor(0, 0);
 
-  if (systemState.stop)
+  if (systemState.stopState)
   {
     lcd.print("XXX");
     turnOffAllHeaters();
@@ -598,7 +603,7 @@ void turnOffAllHeaters()
 {
   for (int i = 0; i < 3; i++)
   {
-    digitalWrite(Pins::TEN_PINS[i], HIGH);
+    digitalWrite(PinConstants::TEN_PINS[i], HIGH);
   }
 }
 
@@ -651,13 +656,511 @@ void displayHSVal()
     lcd.print(char(126));
     lcd.print(char(5));
     lcd.print("|");
-    lcd.print(int(t_wi_output));
+    lcd.print(int(temperatureData.t_wi_output));
     lcd.print("|");
     lcd.setCursor(14, 3);
     lcd.print("|");
-    lcd.print(int(t_wo_output));
+    lcd.print(int(temperatureData.t_wo_output));
     lcd.print("|");
     lcd.print(char(5));
     lcd.print(char(126));
   }
+}
+
+void displayMenu()
+{
+  int totalItems = sizeof(menuItems) / sizeof(menuItems[0]);       // Получаем общее количество пунктов меню
+  int startIdx = systemState.currentMenuItem;                      // Индекс первого пункта для отображения
+  int endIdx = startIdx + DataConstants::MAX_MENU_ITEMS_DISPLAYED; // Индекс последнего пункта для отображения
+
+  if (endIdx >= totalItems)
+  {
+    endIdx = totalItems;                                         // Установка конечного индекса на общее количество пунктов
+    startIdx = endIdx - DataConstants::MAX_MENU_ITEMS_DISPLAYED; // Пересчитываем начальный индекс, чтобы показать 4 пункта
+    if (startIdx < 0)
+    {
+      startIdx = 0; // Обработка случая, когда менее 4 пунктов
+    }
+  }
+
+  for (int i = startIdx; i < endIdx; i++)
+  {
+    lcd.setCursor(0, i - startIdx); // Установка позиции на экране LCD для пунктов меню
+    lcd.print((i == systemState.currentMenuItem) ? char(0) : char(32));
+    lcd.print(menuItems[i].label);
+  }
+}
+
+void displaySubMenu()
+{
+  int totalSubMenuItems = 0;
+  SubMenu *currentSubMenu = nullptr;
+
+  if (systemState.subMenuState == SYSTEM_SETTINGS)
+  {
+    totalSubMenuItems = sizeof(subMenuSettings) / sizeof(subMenuSettings[0]);
+    currentSubMenu = subMenuSettings;
+  }
+  else if (systemState.subMenuState == NETWORK_SETTINGS)
+  {
+    totalSubMenuItems = sizeof(subMenuNetworkSettings) / sizeof(subMenuNetworkSettings[0]);
+    currentSubMenu = subMenuNetworkSettings;
+  }
+
+  for (int i = 0; i < totalSubMenuItems; i++)
+  {
+    lcd.setCursor(0, i); // Установка позиции на экране LCD для пунктов субменю
+    lcd.print((i == systemState.currentMenuItem) ? char(0) : char(32));
+    lcd.print(currentSubMenu[i].label);
+  }
+}
+
+void handleMenu(byte keyPressed)
+{
+  MenuState previousMenuState = systemState.menuState;
+  int totalItems = sizeof(menuItems) / sizeof(menuItems[0]);
+
+  switch (keyPressed)
+  {
+  case MenuConstants::DOWN:
+    systemState.currentMenuItem = (systemState.currentMenuItem - 1 + totalItems) % totalItems;
+    break;
+
+  case MenuConstants::UP:
+    systemState.currentMenuItem = (systemState.currentMenuItem + 1) % totalItems;
+    break;
+
+  case MenuConstants::OK:
+    handleMenuOK();
+    break;
+
+  case MenuConstants::LEFT:
+    handleMenuLeft();
+    break;
+  }
+
+  if (systemState.menuState != previousMenuState)
+  {
+    lcd.clear();
+    displayMenu();
+  }
+}
+
+void handleSubMenu(byte keyPressed)
+{
+  int totalItems = 0;
+  SubMenu *currentSubMenu = nullptr;
+
+  if (systemState.subMenuState == SYSTEM_SETTINGS)
+  {
+    totalItems = sizeof(subMenuSettings) / sizeof(subMenuSettings[0]);
+    currentSubMenu = subMenuSettings;
+  }
+  else if (systemState.subMenuState == NETWORK_SETTINGS)
+  {
+    totalItems = sizeof(subMenuNetworkSettings) / sizeof(subMenuNetworkSettings[0]);
+    currentSubMenu = subMenuNetworkSettings;
+  }
+
+  switch (keyPressed)
+  {
+  case MenuConstants::DOWN:
+    systemState.currentMenuItem = (systemState.currentMenuItem - 1 + totalItems) % totalItems;
+    break;
+
+  case MenuConstants::UP:
+    systemState.currentMenuItem = (systemState.currentMenuItem + 1) % totalItems;
+    break;
+
+  case MenuConstants::OK:
+    handleSubMenuOK(currentSubMenu);
+    break;
+
+  case MenuConstants::LEFT:
+    handleSubMenuLeft();
+    break;
+  }
+  displaySubMenu();
+}
+
+// Обработка события OK в основном меню
+void handleMenuOK()
+{
+  MenuItem *currentItem = &menuItems[systemState.currentMenuItem];
+  if (currentItem->subMenu != nullptr)
+  {
+    systemState.menuState = SUB_MENU;
+    systemState.subMenu = currentItem->subMenu;
+    if (currentItem->action != nullptr)
+    {
+      currentItem->action();
+    }
+    systemState.currentMenuItem = 0;
+    lcd.clear();
+    displaySubMenu();
+  }
+  else if (currentItem->action != nullptr)
+  {
+    currentItem->action();
+  }
+}
+
+// Обработка события LEFT в основном меню
+void handleMenuLeft()
+{
+  eepromData.updateFromSystemState(systemState);
+  eepromData.writeToEEPROM(DataConstants::startAddress);
+  systemState.menuState = NORMAL;
+  lcd.clear();
+}
+
+void handleSubMenuOK(SubMenu *currentSubMenu)
+{
+  if (currentSubMenu != nullptr)
+  {
+    SubMenu *currentItem = &currentSubMenu[systemState.currentMenuItem];
+    if (currentItem->subMenu != nullptr)
+    {
+      systemState.previousSubMenu = systemState.subMenu;
+      systemState.subMenu = currentItem->subMenu;
+      if (currentItem->action != nullptr)
+      {
+        currentItem->action();
+      }
+    }
+    else if (currentItem->action != nullptr)
+    {
+      currentItem->action();
+    }
+
+    systemState.currentMenuItem = 0;
+    lcd.clear();
+    displaySubMenu();
+  }
+}
+
+void handleSubMenuLeft()
+{
+  if (systemState.menuState == SUB_MENU)
+  {
+    systemState.menuState = MAIN_MENU;
+    systemState.currentMenuItem = 0;
+    lcd.clear();
+    displayMenu();
+  }
+}
+
+void handleTemp(byte keyPressed)
+{
+  static int Temperature = systemState.setWoInTemp; // Используем статическую переменную для сохранения значения между вызовами функции
+
+  if (keyPressed == MenuConstants::DOWN)
+  {
+    if (Temperature < 85)
+    { // Убедимся, что значение не превышает 85
+      Temperature++;
+    }
+  }
+  else if (keyPressed == MenuConstants::UP)
+  {
+    if (Temperature > 0)
+    { // Убедимся, что значение не меньше 0
+      Temperature--;
+    }
+  }
+  systemState.setWoInTemp = Temperature; // Присваиваем новое значение переменной systemState.setWoInTemp
+  eepromData.setWoInTemp = systemState.setWoInTemp;
+  eepromData.writeToEEPROM(DataConstants::startAddress);
+}
+
+void handleHeaterSettings()
+{
+  lcd.clear();
+  int heaterValues[] = {systemState.heater[0], systemState.heater[1], systemState.heater[2]};
+  const char *heaterNames[] = {"Heater A: ", "Heater B: ", "Heater C: "};
+
+  int currentField = 0;
+
+  while (true)
+  {
+    if (timeData.currentTime - timeData.lastActionTime >= timeData.updateInterval)
+    {
+      lcd.clear();
+      timeData.lastActionTime = timeData.currentTime;
+    }
+    for (int i = 0; i < 3; i++)
+    {
+      systemState.heater[i] = heaterValues[i];
+      digitalWrite(PinConstants::TEN_PINS[i], heaterValues[i] ? LOW : HIGH);
+    }
+    lcd.setCursor(0, 0);
+    lcd.print("Heaters On/Off");
+    for (int i = 0; i < 3; i++)
+    {
+      lcd.setCursor(0, i + 1);
+      lcd.print(i == currentField ? char(0) : char(32));
+      lcd.print(i + 1);
+      lcd.print(": ");
+      lcd.print(heaterNames[i]);
+      lcd.print(heaterValues[i] == 1 ? "on" : "off");
+      lcd.print("   ");
+    }
+
+    byte keyPressed = readKey();
+
+    if (keyPressed == MenuConstants::DOWN)
+    {
+      currentField = (currentField + 1) % 3;
+    }
+    else if (keyPressed == MenuConstants::UP)
+    {
+      currentField = (currentField + 1) % 3;
+    }
+    else if (keyPressed == MenuConstants::RIGHT || keyPressed == MenuConstants::LEFT)
+    {
+      heaterValues[currentField] = !heaterValues[currentField]; // Toggle heater value
+      digitalWrite(PinConstants::TEN_PINS[currentField], heaterValues[currentField] ? LOW : HIGH);
+    }
+    else if (keyPressed == MenuConstants::OK)
+    {
+      for (int i = 0; i < 3; i++)
+      {
+        systemState.heater[i] = heaterValues[i];
+        digitalWrite(PinConstants::TEN_PINS[i], heaterValues[i] ? LOW : HIGH);
+      }
+      systemState.menuState = MAIN_MENU;
+      break;
+    }
+  }
+}
+
+void handlePumpSettings()
+{
+  lcd.clear();
+  const char *pumpName = "Pump: ";
+  while (true)
+  {
+    if (timeData.currentTime - timeData.lastActionTime >= timeData.updateInterval)
+    {
+      lcd.clear();
+      timeData.lastActionTime = timeData.currentTime;
+    }
+    controlPump();
+    lcd.setCursor(0, 0);
+    lcd.print("Pump On/Off");
+    lcd.setCursor(0, 1);
+    lcd.print(char(0));
+    // lcd.print(1);
+    // lcd.print(": ");
+    lcd.print(pumpName);
+    lcd.print(systemState.pumpState == 1 ? "on" : "off");
+    lcd.print("   ");
+
+    byte keyPressed = readKey();
+
+    if (keyPressed == MenuConstants::RIGHT || keyPressed == MenuConstants::LEFT)
+    {
+      systemState.pumpState = !systemState.pumpState; // Toggle pump value
+      controlPump();
+    }
+    else if (keyPressed == MenuConstants::OK)
+    {
+      systemState.menuState = MAIN_MENU;
+      break;
+    }
+  }
+}
+
+void handleModeSettings()
+{
+  lcd.clear();
+  const char *ItemName = "Mode: ";
+
+  while (true)
+  {
+    if (timeData.currentTime - timeData.lastActionTime >= timeData.updateInterval)
+    {
+      lcd.clear();
+      timeData.lastActionTime = timeData.currentTime;
+    }
+    lcd.setCursor(0, 0);
+    lcd.print("Work mode");
+    lcd.setCursor(0, 1);
+    lcd.print(char(0));
+
+    lcd.print(ItemName);
+    lcd.print(systemState.workMode == 0 ? "AUTO" : "MANU");
+
+    byte keyPressed = readKey();
+
+    if (keyPressed == MenuConstants::RIGHT || keyPressed == MenuConstants::LEFT)
+    {
+      systemState.workMode = !systemState.workMode; // Toggle pump value
+      // lcd.print(systemState.workMode == 0 ? "AUTO" : "MANU");
+    }
+    else if (keyPressed == MenuConstants::OK)
+    {
+      systemState.menuState = MAIN_MENU;
+      break;
+    }
+  }
+}
+
+void handleNetworkSettingsMenu(byte keyPressed, NetworkSettings &settings)
+{
+  int selectedItem = systemState.selectedItem;
+  int mode = systemState.NetworkEditMode;
+  int tempItem = systemState.tempItem;
+  int totalItems = 3;
+  switch (keyPressed)
+  {
+  case MenuConstants::UP:
+    if (mode == 0)
+    {
+    }
+    else if (mode == 1)
+    {
+      if (settings.ipAddress[tempItem] < '9')
+      {
+        settings.ipAddress[tempItem]++;
+      }
+      else
+      {
+        settings.ipAddress[tempItem] = '0';
+      }
+    }
+    break;
+  case MenuConstants::DOWN:
+    if (mode == 0)
+    {
+      if (settings.ipAddress[tempItem] > '0')
+      {
+        settings.ipAddress[tempItem]--;
+      }
+      else
+      {
+        settings.ipAddress[tempItem] = '9';
+      }
+    }
+    else if (mode == 1)
+    {
+      if (settings.ipAddress[tempItem] > '0')
+      {
+        settings.ipAddress[tempItem]--;
+      }
+      else
+      {
+        settings.ipAddress[tempItem] = '9';
+      }
+    }
+    break;
+  case MenuConstants::LEFT:
+    if (mode == 1)
+    {
+      if (selectedItem > 0)
+      {
+        selectedItem--;
+      }
+    }
+    else if (mode == 3)
+    {
+      if (selectedItem > 0)
+      {
+        selectedItem--;
+      }
+    }
+    break;
+  case MenuConstants::RIGHT:
+    if (mode == 1)
+    {
+      if (selectedItem < 14)
+      {
+        selectedItem++;
+      }
+    }
+    else if (mode == 3)
+    {
+      if (selectedItem < 14)
+      {
+        selectedItem++;
+      }
+    }
+    break;
+  case MenuConstants::OK:
+    if (mode == 0 && selectedItem == 0 || 1 || 2)
+    {
+    }
+    else if (mode == 1 && selectedItem == 0 || 1 || 2)
+    {
+    }
+    else if (selectedItem == 3)
+    {
+    }
+    break;
+  }
+}
+
+void heaterController()
+{
+  float setWoInTemp = systemState.setWoInTemp;
+  if (systemState.workMode == 0)
+  {
+    if (timeData.currentTime - timeData.lastTempActionTime >= timeData.updateInterval)
+    {
+      timeData.lastTempActionTime = timeData.currentTime;
+      if (temperatureData.waterOutTemp < temperatureData.t_wo_output)
+      {
+        int heatersToTurnOn = 1;
+        for (int i = 0; i < DataConstants::MAX_HEATERS && heatersToTurnOn > 0; ++i)
+        {
+          if (systemState.heater[i] == 0)
+          {
+            systemState.heater[i] = 1;
+            heatersToTurnOn--;
+          }
+        }
+        if (heatersToTurnOn == 0)
+        {
+          systemState.tempReached = 0;
+        }
+      }
+      else if (temperatureData.waterOutTemp >= temperatureData.t_wo_output)
+      {
+        for (int i = 0; i < DataConstants::MAX_HEATERS; ++i)
+        {
+          systemState.heater[i] = 0;
+        }
+        systemState.tempReached = 1;
+      }
+    }
+  }
+  else if (systemState.workMode == 1)
+  {
+    if (timeData.currentTime - timeData.lastTempActionTime >= timeData.updateInterval)
+    {
+      timeData.lastTempActionTime = timeData.currentTime;
+      if (temperatureData.waterOutTemp < setWoInTemp)
+      {
+        for (int i = 0; i < DataConstants::MAX_HEATERS; ++i)
+        {
+          systemState.heater[i] = systemState.tempHeater[i];
+        }
+        systemState.tempReached = 0;
+      }
+      else if (temperatureData.waterOutTemp >= setWoInTemp)
+      {
+        for (int i = 0; i < DataConstants::MAX_HEATERS; ++i)
+        {
+          systemState.tempHeater[i] = systemState.heater[i];
+          systemState.heater[i] = 0;
+        }
+        systemState.tempReached = 1;
+      }
+    }
+  }
+}
+
+void controlPump()
+{
+  digitalWrite(PinConstants::PUMP_PIN, systemState.pumpState ? LOW : HIGH);
 }

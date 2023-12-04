@@ -3,7 +3,7 @@
     "debugger": "jlink",
     "sketch": "TEPLOTECH.ino",
     "output": "./build/arduino.avr.uno",
-    "port": "COM3",
+    "port": "COM12",
     "programmer": "arduinoisp",
-    "configuration": "cpu=atmega328old"
+    "configuration": "cpu=atmega328"
 }
