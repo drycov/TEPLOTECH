@@ -466,10 +466,12 @@ void handleButton(Button button) {
       stopped = !stopped;
       clearHeaterDemand();
       applyOutputs();
-    } else if (button == KEY_UP && settings.manualTargetC < Limits::MANUAL_TARGET_MAX_C) {
+    } else if (settings.mode == MODE_MANUAL && button == KEY_UP &&
+               settings.manualTargetC < Limits::MANUAL_TARGET_MAX_C) {
       settings.manualTargetC += 1.0f;
       saveSettings();
-    } else if (button == KEY_DOWN && settings.manualTargetC > Limits::MANUAL_TARGET_MIN_C) {
+    } else if (settings.mode == MODE_MANUAL && button == KEY_DOWN &&
+               settings.manualTargetC > Limits::MANUAL_TARGET_MIN_C) {
       settings.manualTargetC -= 1.0f;
       saveSettings();
     }
