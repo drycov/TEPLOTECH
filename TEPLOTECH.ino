@@ -77,6 +77,35 @@ struct Readings {
   bool waterOutValid;
 };
 
+// Explicit prototypes keep Arduino IDE sketch preprocessing compatible with
+// the user-defined settings and readings types above.
+uint16_t crc16Add(uint16_t crc, uint8_t value);
+uint16_t settingsChecksum(const PersistentSettings &value);
+bool settingsAreValid(const PersistentSettings &value);
+void saveSettings();
+void loadSettings();
+Button readRawButton();
+Button readButtonEvent(uint32_t now);
+bool readTemperature(uint8_t pin, float &result);
+void readAllTemperatures();
+float interpolateOutdoorTarget(float outsideC);
+float activeTargetC();
+void setRelay(uint8_t pin, bool enabled);
+void applyOutputs();
+void clearHeaterDemand();
+void updateHeaterController(uint32_t now);
+void printRow(uint8_t row, const char *text);
+void formatTemperature(char *buffer, size_t size, const char *label,
+                       bool valid, float value);
+void renderHome();
+void renderMenu();
+void renderScreen();
+void enterScreen(Screen next);
+void handleMenuButton(Button button);
+void handleButton(Button button);
+void setup();
+void loop();
+
 const int8_t OUTDOOR_POINTS[13] = {
   -40, -37, -35, -30, -25, -20, -15, -10, -5, 0, 5, 8, 10
 };
