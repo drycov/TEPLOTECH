@@ -338,29 +338,22 @@ void renderHome() {
            heaterOutput[2] ? '1' : '0');
   printRow(0, row);
 
-  snprintf(row, sizeof(row), "Room:%3sC Out:%3sC",
-           readings.roomValid ? " " : "E",
-           readings.outsideValid ? " " : "E");
-  if (readings.roomValid) {
-    snprintf(row, sizeof(row), "Room:%3dC Out:%3dC",
-             (int)readings.roomC, (int)readings.outsideC);
-  } else if (readings.outsideValid) {
-    snprintf(row, sizeof(row), "Room:  E Out:%3dC", (int)readings.outsideC);
-  } else {
-    snprintf(row, sizeof(row), "Room:  E Out:  E");
-  }
-  printRow(1, row);
+  char room[4];
+  char outside[4];
+  char waterIn[4];
+  char waterOut[4];
+  if (readings.roomValid) snprintf(room, sizeof(room), "%3d", (int)readings.roomC);
+  else strcpy(room, "  E");
+  if (readings.outsideValid) snprintf(outside, sizeof(outside), "%3d", (int)readings.outsideC);
+  else strcpy(outside, "  E");
+  if (readings.waterInValid) snprintf(waterIn, sizeof(waterIn), "%3d", (int)readings.waterInC);
+  else strcpy(waterIn, "  E");
+  if (readings.waterOutValid) snprintf(waterOut, sizeof(waterOut), "%3d", (int)readings.waterOutC);
+  else strcpy(waterOut, "  E");
 
-  if (readings.waterInValid && readings.waterOutValid) {
-    snprintf(row, sizeof(row), "In:%3dC Out:%3dC",
-             (int)readings.waterInC, (int)readings.waterOutC);
-  } else if (readings.waterInValid) {
-    snprintf(row, sizeof(row), "In:%3dC Out:  E", (int)readings.waterInC);
-  } else if (readings.waterOutValid) {
-    snprintf(row, sizeof(row), "In:  E Out:%3dC", (int)readings.waterOutC);
-  } else {
-    snprintf(row, sizeof(row), "In:  E Out:  E");
-  }
+  snprintf(row, sizeof(row), "Rm:%sC Out:%sC", room, outside);
+  printRow(1, row);
+  snprintf(row, sizeof(row), "In:%sC Out:%sC", waterIn, waterOut);
   printRow(2, row);
 
   if (settings.mode == MODE_AUTO && readings.outsideValid) {
