@@ -330,23 +330,38 @@ void formatTemperature(char *buffer, size_t size, const char *label,
 
 void renderHome() {
   char row[21];
-  snprintf(row, sizeof(row), "%s %s  A:%s",
+  snprintf(row, sizeof(row), "%s %s H:%c%c%c",
            settings.mode == MODE_AUTO ? "AUTO" : "MANUAL",
            stopped ? "STOP" : "RUN",
-           heaterOutput[0] || heaterOutput[1] || heaterOutput[2] ? "ON" : "OFF");
+           heaterOutput[0] ? '1' : '0',
+           heaterOutput[1] ? '1' : '0',
+           heaterOutput[2] ? '1' : '0');
   printRow(0, row);
 
-  formatTemperature(row, sizeof(row), "Room:", readings.roomValid, readings.roomC);
+  snprintf(row, sizeof(row), "Room:%3sC Out:%3sC",
+           readings.roomValid ? " " : "E",
+           readings.outsideValid ? " " : "E");
+  if (readings.roomValid) {
+    snprintf(row, sizeof(row), "Room:%3dC Out:%3dC",
+             (int)readings.roomC, (int)readings.outsideC);
+  } else if (readings.outsideValid) {
+    snprintf(row, sizeof(row), "Room:  E Out:%3dC", (int)readings.outsideC);
+  } else {
+    snprintf(row, sizeof(row), "Room:  E Out:  E");
+  }
   printRow(1, row);
-  formatTemperature(row, sizeof(row), "Outside:", readings.outsideValid, readings.outsideC);
-  printRow(2, row);
 
-  char waterIn[12];
-  char waterOut[12];
-  formatTemperature(waterIn, sizeof(waterIn), "In:", readings.waterInValid, readings.waterInC);
-  formatTemperature(waterOut, sizeof(waterOut), "Out:", readings.waterOutValid, readings.waterOutC);
-  snprintf(row, sizeof(row), "%-10s %-10s", waterIn, waterOut);
-  printRow(3, row);
+  if (readings.waterInValid && readings.waterOutValid) {
+    snprintf(row, sizeof(row), "In:%3dC Out:%3dC",
+             (int)readings.waterInC, (int)readings.waterOutC);
+  } else if (readings.waterInValid) {
+    snprintf(row, sizeof(row), "In:%3dC Out:  E", (int)readings.waterInC);
+  } else if (readings.waterOutValid) {
+    snprintf(row, sizeof(row), "In:  E Out:%3dC", (int)readings.waterOutC);
+  } else {
+    snprintf(row, sizeof(row), "In:  E Out:  E");
+  }
+  printRow(2, row);
 
   if (settings.mode == MODE_AUTO && readings.outsideValid) {
     snprintf(row, sizeof(row), "Target:%2dC Pump:%s",
@@ -355,7 +370,7 @@ void renderHome() {
     snprintf(row, sizeof(row), "Set:%2dC Pump:%s",
              (int)settings.manualTargetC, pumpOutput ? "ON" : "OFF");
   }
-  printRow(0, row);
+  printRow(3, row);
 }
 
 const char *const MENU_ITEMS[] = {
