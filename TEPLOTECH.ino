@@ -14,9 +14,11 @@
 #include <stdio.h>
 #include <string.h>
 
-// TEPLOTECH EVP-6: local heating controller.
-// Relay outputs are active LOW, matching the original wiring.
-// Heating is always inhibited at startup until the operator clears STOP.
+// External controller for the Teploteh EVP-6M electric boiler.
+// The three outputs represent 2/4/6 kW stages and are active LOW, matching
+// the original relay-interface design. They must drive isolated, rated
+// interfaces; never connect MCU pins directly to the boiler power circuit.
+// Heating is inhibited at startup until the operator clears STOP.
 
 namespace Pins {
 const uint8_t LCD_ADDRESS = 0x27;
