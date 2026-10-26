@@ -1,7 +1,15 @@
 #include <EEPROM.h>
 #include <GyverNTC.h>
-#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
 #include <math.h>
+#if defined(TEPLOTECH_USE_OLED)
+#include <U8g2lib.h>
+#ifndef TEPLOTECH_OLED_I2C_ADDRESS
+#define TEPLOTECH_OLED_I2C_ADDRESS 0x3C
+#endif
+#else
+#include <LiquidCrystal_I2C.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,11 +19,22 @@
 // Heating is always inhibited at startup until the operator clears STOP.
 
 namespace Pins {
+#if defined(ARDUINO_ARCH_ESP32)
+const uint8_t HEATERS[3] = {25, 26, 27};
+const uint8_t PUMP = 14;
+const uint8_t KEYPAD = 36;
+const uint8_t SENSORS[4] = {32, 33, 34, 35};
+const uint8_t I2C_SDA = 21;
+const uint8_t I2C_SCL = 22;
+#else
 const uint8_t HEATERS[3] = {3, 4, 5};
 const uint8_t PUMP = 6;
 const uint8_t KEYPAD = A3;
 const uint8_t SENSORS[4] = {A1, A2, A6, A7};
+const uint8_t I2C_SDA = A4;
+const uint8_t I2C_SCL = A5;
 const uint8_t LCD_ADDRESS = 0x27;
+#endif
 }
 
 namespace Limits {
@@ -95,8 +114,7 @@ void applyOutputs();
 void clearHeaterDemand();
 void updateHeaterController(uint32_t now);
 void printRow(uint8_t row, const char *text);
-void formatTemperature(char *buffer, size_t size, const char *label,
-                       bool valid, float value);
+void renderScreenContents();
 void renderHome();
 void renderMenu();
 void renderScreen();
@@ -114,7 +132,15 @@ const float WATER_OUT_TARGETS[13] = {
   61.9f, 56.2f, 50.3f, 44.1f, 40.2f, 37.5f
 };
 
+#if defined(TEPLOTECH_USE_OLED)
+#if defined(TEPLOTECH_OLED_SH1106)
+U8G2_SH1106_128X64_NONAME_1_HW_I2C oled(U8G2_R0, U8X8_PIN_NONE);
+#else
+U8G2_SSD1306_128X64_NONAME_1_HW_I2C oled(U8G2_R0, U8X8_PIN_NONE);
+#endif
+#else
 LiquidCrystal_I2C lcd(Pins::LCD_ADDRESS, 20, 4);
+#endif
 GyverNTC thermistor;
 
 PersistentSettings settings;
@@ -199,6 +225,9 @@ void loadSettings() {
 
 Button readRawButton() {
   const int value = analogRead(Pins::KEYPAD);
+#if defined(ARDUINO_ARCH_ESP32)
+  value = (value * 1023L) / 4095L;
+#endif
   if (value < 50) return KEY_LEFT;
   if (value < 160) return KEY_DOWN;
   if (value < 360) return KEY_UP;
@@ -339,6 +368,10 @@ void updateHeaterController(uint32_t now) {
 }
 
 void printRow(uint8_t row, const char *text) {
+#if defined(TEPLOTECH_USE_OLED)
+  // Page-buffer U8g2 uses only a small fraction of Nano SRAM.
+  oled.drawStr(0, 11 + row * 16, text);
+#else
   lcd.setCursor(0, row);
   uint8_t written = 0;
   while (*text && written < 20) {
@@ -346,6 +379,7 @@ void printRow(uint8_t row, const char *text) {
     ++written;
   }
   while (written++ < 20) lcd.print(' ');
+#endif
 }
 
 void formatTemperature(char *buffer, size_t size, const char *label,
@@ -413,7 +447,7 @@ void renderMenu() {
   }
 }
 
-void renderScreen() {
+void renderScreenContents() {
   char row[21];
   switch (screen) {
     case SCREEN_HOME:
@@ -456,9 +490,22 @@ void renderScreen() {
   }
 }
 
+void renderScreen() {
+#if defined(TEPLOTECH_USE_OLED)
+  oled.firstPage();
+  do {
+    renderScreenContents();
+  } while (oled.nextPage());
+#else
+  renderScreenContents();
+#endif
+}
+
 void enterScreen(Screen next) {
   screen = next;
+#if !defined(TEPLOTECH_USE_OLED)
   lcd.clear();
+#endif
   if (next == SCREEN_MODE) modeDraft = settings.mode;
   if (next == SCREEN_TARGET) targetDraftC = settings.manualTargetC;
   if (next == SCREEN_HEATERS) {
@@ -572,9 +619,22 @@ void setup() {
   pinMode(Pins::PUMP, OUTPUT);
 
   thermistor.config(10000, 3950);
+#if defined(ARDUINO_ARCH_ESP32)
+  analogReadResolution(10);
+  Wire.begin(Pins::I2C_SDA, Pins::I2C_SCL);
+#else
+  Wire.begin();
+#endif
+
+#if defined(TEPLOTECH_USE_OLED)
+  oled.setI2CAddress((uint8_t)(TEPLOTECH_OLED_I2C_ADDRESS << 1));
+  oled.begin();
+  oled.setFont(u8g2_font_5x7_tf);
+#else
   lcd.init();
   lcd.backlight();
   lcd.clear();
+#endif
 
   loadSettings();
   stopped = true;  // Require an explicit operator action after every reboot.
