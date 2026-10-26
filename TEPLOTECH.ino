@@ -19,6 +19,7 @@
 // Heating is always inhibited at startup until the operator clears STOP.
 
 namespace Pins {
+const uint8_t LCD_ADDRESS = 0x27;
 #if defined(ARDUINO_ARCH_ESP32)
 const uint8_t HEATERS[3] = {25, 26, 27};
 const uint8_t PUMP = 14;
@@ -33,7 +34,6 @@ const uint8_t KEYPAD = A3;
 const uint8_t SENSORS[4] = {A1, A2, A6, A7};
 const uint8_t I2C_SDA = A4;
 const uint8_t I2C_SCL = A5;
-const uint8_t LCD_ADDRESS = 0x27;
 #endif
 }
 
